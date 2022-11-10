@@ -43,6 +43,7 @@ class World:
         self.pairwise_distances = pdist(self.coordinates_vector, self.coordinates_vector)
 
     def generate_field(self):
+        world_tensor_size = (int(self.size[0]//self.res), int(self.size[1]//self.res))
         if self.nutrient_map_type == "Uniform":
             self.nutrient_map = self.max_nutrient_density * self.res**2 *\
              torch.ones(world_tensor_size, device=self.device)
