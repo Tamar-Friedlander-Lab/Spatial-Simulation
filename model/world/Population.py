@@ -34,6 +34,9 @@ class Population:
         self.world.GenerateField()
         self.densities = densities
 
+        self.pollen_kernel = lambda r: torch.exp(-r**2 / 1.5) / 6.81978
+        self.pollen_pdf = self.pollen_kernel(self.world.pairwise_distances)
+
     def make_population(self):
         if self.densities == "Gaussian":
             self.make_population_gaussians()
@@ -47,6 +50,10 @@ class Population:
 
         # Generate population
         self.population = 20 * torch.exp(-(distances ** 2) / 20)
+    
+    # This function should not exist
+    def compute_pollen(self):
+        return
 
     def show_population(self, out_file=None):
         if self.num_types == 2:

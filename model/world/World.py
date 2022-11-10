@@ -4,6 +4,8 @@ import torch
 from typing import List, Tuple, Union
 from os import path as osp
 
+from utils import vectors
+
 
 class World:
     # CLASS ATTRIBUTES
@@ -28,15 +30,23 @@ class World:
         self.nutrient_map_type = nutrient_map_type
         self.device = device
 
-
-    def GenerateField(self):
+    def make_world_coordinates(self):
         world_tensor_size = (int(self.size[0]//self.res), int(self.size[1]//self.res))
+        world_tensor_numel = world_tensor_size[0] * world_tensor_size[1]
+        
+        self.coordinates =\
+                torch.stack(torch.meshgrid(self.size[0]/2*torch.linspace(-1,1,world_tensor_size[0]),
+                 self.size[1]/2*torch.linspace(-1,1,world_tensor_size[1])))
+        self.coordinates_vector = vectors.vectorize((self.coordinates[0,:,:], self.coordinates[1,:,:]))
+
+        pdist = torch.nn.PairwiseDistance(p=2)
+        self.pairwise_distances = pdist(self.coordinates_vector, self.coordinates_vector)
+
+    def generate_field(self):
         if self.nutrient_map_type == "Uniform":
             self.nutrient_map = self.max_nutrient_density * self.res**2 *\
              torch.ones(world_tensor_size, device=self.device)
-            self.coordinates =\
-                torch.stack(torch.meshgrid(self.size[0]/2*torch.linspace(-1,1,world_tensor_size[0]),
-                 self.size[1]/2*torch.linspace(-1,1,world_tensor_size[1])))
+            
         else:
             assert(0==1)
             
