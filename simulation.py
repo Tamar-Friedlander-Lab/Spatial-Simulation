@@ -1,9 +1,10 @@
 from model.world import Population, World
 import torch
 
-w = World()
+w = World(nutrient_map_type="Rock")
 p = Population(world=w)
 p.make_population()
 p.show_population()
-print(w.max_nutrient_density)
-print(torch.std(w.nutrient_map))
+for i in range(15):
+    p.advance()
+    p.show_population()
