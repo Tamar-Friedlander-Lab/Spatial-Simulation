@@ -49,6 +49,8 @@ class Population:
         self.seed_rate = seed_rate
         self.max_seeds = max_seeds
 
+        self.generation = 0
+
         pollen_kernel = torch.exp(-torch.sum(self.world.coordinates**2, 0)/1.5) / 6.81978
         self.pollen_func = self.make_pollen_function(pollen_kernel, self.world.device)
 
@@ -70,9 +72,10 @@ class Population:
 
     def make_population_gaussians(self):
         # Compute distances from each center
-        centers = [Tensor([-4, 0]), Tensor([4, 0])]
-        distances = torch.stack([torch.sqrt((self.world.coordinates[0, :, :] - centers[i][0]) ** 2 + \
-                                            (self.world.coordinates[1, :, :] - centers[i][1]) ** 2) \
+        world_size_tensor = torch.tensor(self.world.size)
+        centers = (torch.rand(2,2)*2 - 1) * world_size_tensor
+        distances = torch.stack([torch.sqrt((self.world.coordinates[0, :, :] - centers[i,0]) ** 2 + \
+                                            (self.world.coordinates[1, :, :] - centers[i,1]) ** 2) \
                                  for i in range(len(centers))])
 
         # Generate population
@@ -90,8 +93,8 @@ class Population:
         return torch.min(self.seed_rate * norm_interactions, torch.tensor(self.max_seeds))
 
     def carrying_capacity(self, new_seeds):
-        regulated = new_seeds / torch.max(torch.sum(new_seeds, 0)/self.world.nutrient_map, torch.tensor(1.0))
-        regulated = regulated.where(self.world.nutrient_map!=0, torch.tensor(0.0))
+        regulated = new_seeds * torch.min(self.world.nutrient_map/torch.sum(new_seeds, 0), torch.tensor(1.0))
+        regulated = regulated.where(torch.sum(new_seeds, 0)>1e-6, torch.tensor(0.0))
         return regulated
 
     
@@ -104,20 +107,23 @@ class Population:
         new_seeds = self.compute_offspring(interactions)
         self.population = self.carrying_capacity(new_seeds)
 
+        self.generation += 1
+
         assert(torch.all(torch.sum(self.population, 0) <= self.world.nutrient_map))
 
-    def show_population(self, out_file=None, block=True):
+    def show_population(self, out_file=None, block=True, ax:plt.Axes=None):
         if self.num_types == 2:
             population_image = \
                 torch.permute( \
                     torch.stack(
                         [*(self.population / self.world.nutrient_map), torch.zeros_like(self.world.nutrient_map)]),
                     (1, 2, 0)).numpy()
-            population_image[np.isnan(population_image)] = 0.0
             population_image /= np.max(population_image)
         if out_file is not None:
             plt.imsave(out_file, population_image)
         else:
-            plt.imshow(population_image)
-            plt.show(block=block)
+            ax.clear()
+            ax.imshow(population_image)
+            ax.set_title(f"Generation {self.generation}")
+            plt.pause(.33)
 

@@ -11,3 +11,7 @@ model/utils/__pycache__/distributions.cpython-310.pyc
 model/utils/__pycache__/vectors.cpython-310.pyc
 model/world/__pycache__/Population.cpython-310.pyc
 model/world/__pycache__/World.cpython-310.pyc
+model/utils/__pycache__/__init__.cpython-310.pyc
+model/utils/__pycache__/distributions.cpython-310.pyc
+model/world/__pycache__/Population.cpython-310.pyc
+model/world/__pycache__/World.cpython-310.pyc
