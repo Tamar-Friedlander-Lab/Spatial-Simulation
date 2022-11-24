@@ -4,15 +4,17 @@ import torch
 from typing import List, Tuple, Union
 from os import path as osp
 
+from model.utils import vectors
+
 
 class World:
     # CLASS ATTRIBUTES
-    POSSIBLE_MAP_TYPES = ["Uniform", "Gaussian", "Random"]
+    POSSIBLE_MAP_TYPES = ["Uniform", "Gaussian", "Random", "Rock"]
 
     def __init__(self,
                 seed:int=None, 
                 max_nutrient_density:float=20, 
-                size:Union[List[int], Tuple[int]]=(20, 20),
+                size:Union[List[int], Tuple[int]]=(21, 21),
                 res:float=1.,
                 nutrient_map_type:str="Uniform",
                 device:str="cpu"):
@@ -28,15 +30,27 @@ class World:
         self.nutrient_map_type = nutrient_map_type
         self.device = device
 
+    def make_world_coordinates(self, world_tensor_size):
+        world_tensor_numel = world_tensor_size[0] * world_tensor_size[1]
+        
+        self.coordinates =\
+                torch.stack(torch.meshgrid(self.size[0]/2*torch.linspace(-1,1,world_tensor_size[0]),
+                 self.size[1]/2*torch.linspace(-1,1,world_tensor_size[1])))
+        self.coordinates_vector = vectors.vectorize((self.coordinates[0,:,:], self.coordinates[1,:,:]))
 
-    def GenerateField(self):
+        pdist = torch.nn.PairwiseDistance(p=2)
+        self.pairwise_distances = pdist(self.coordinates_vector, self.coordinates_vector)
+
+    def generate_field(self):
         world_tensor_size = (int(self.size[0]//self.res), int(self.size[1]//self.res))
+        self.make_world_coordinates(world_tensor_size)
         if self.nutrient_map_type == "Uniform":
             self.nutrient_map = self.max_nutrient_density * self.res**2 *\
              torch.ones(world_tensor_size, device=self.device)
-            self.coordinates =\
-                torch.stack(torch.meshgrid(self.size[0]/2*torch.linspace(-1,1,world_tensor_size[0]),
-                 self.size[1]/2*torch.linspace(-1,1,world_tensor_size[1])))
+        elif self.nutrient_map_type == "Rock":
+            self.nutrient_map = self.max_nutrient_density * self.res**2 *\
+             torch.ones(world_tensor_size, device=self.device)
+            self.nutrient_map = self.nutrient_map.where(torch.sqrt(torch.sum(self.coordinates**2, 0))>=3, torch.tensor(0.0))
         else:
             assert(0==1)
             

@@ -1,9 +1,14 @@
-from world import Population, World
+from model.world import Population, World
+import time
+from matplotlib import pyplot as plt
 import torch
 
-w = World()
+fig, ax = plt.subplots()
+
+w = World(nutrient_map_type="Uniform")
 p = Population(world=w)
-p.MakePopulation()
-p.ShowPopulation(out_file="tests/init_population.png")
-print(w.max_nutrient_density)
-print(torch.std(w.nutrient_map))
+p.make_population()
+p.show_population(ax=ax)
+for i in range(100):
+    p.advance()
+    p.show_population(ax=ax)
