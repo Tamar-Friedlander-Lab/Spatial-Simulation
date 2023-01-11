@@ -20,15 +20,16 @@ class Population:
     """
 
     # CLASS ATTRIBUTES
-    POSSIBLE_POPULATION_TYPES = ["Gaussian", "Circles"]
+    POSSIBLE_POPULATION_TYPES = ["Gaussian", "Circles", "Half"]
  
     def __init__(self,
                  num_types: int = 2,
                  seed: int = None,
                  world: World = None,
                  init_population="Gaussian",
-                 pollen_range = None,
-                 pollen_res = None,
+                 compatibility=None,
+                 self_pollen = 0.8,
+                 inbreeding_depression = 0.5,
                  seed_rate = 1,
                  max_seeds = 20):
 
@@ -44,15 +45,15 @@ class Population:
         else:
             self.world = World()
         self.world.generate_field()
-        if pollen_res is not None:
-            assert(pollen_res%world.res==0.0)
-        else:
-            pollen_res = self.world.res
 
         self.init_population = init_population
         self.seed_rate = seed_rate
         self.max_seeds = max_seeds
-
+        self.self_pollen = self_pollen
+        self.inbreeding_depression = inbreeding_depression
+        if compatibility is None:
+            compatibility = 1-torch.eye(self.num_types)
+        self.compatibility = torch.unsqueeze(torch.unsqueeze(compatibility, -1),-1)
         self.generation = 0
 
         pollen_kernel = torch.exp(-torch.sqrt(torch.sum(self.world.coordinates**2, 0))/2)
@@ -60,6 +61,7 @@ class Population:
 
         seed_kernel = torch.ones(3,3)
         seed_kernel[1,1] = self.max_seeds - 8
+        seed_kernel = seed_kernel/seed_kernel.sum()
         self.seed_func = self.make_seed_function(seed_kernel, self.world.device)
         # self.pollen_pdf = self.pollen_kernel(self.world.pairwise_distances)
 
@@ -78,25 +80,31 @@ class Population:
             self.make_population_gaussians()
         elif self.init_population == "Circles":
             self.make_population_circles()
+        elif self.init_population == "Half":
+            self.make_population_half()
         self.population = self.carrying_capacity(self.population)
+        self.total_population = self.population.sum(0)
 
     def make_population_gaussians(self):
         # Compute distances from each center
         if self.num_types == 2:
-            enters = [Tensor([-25, 0]), Tensor([25, 0])]
+            centers = [Tensor([-10, 0]), Tensor([10, 0])]
         elif self.num_types == 3:
-            centers = [Tensor([-25, 0]), Tensor([25, 0]), Tensor([0, 25])]
+            centers = [Tensor([-25, 0]), Tensor([25, 0]), Tensor([0, 25]), Tensor([0, -25])]
         distances = torch.stack([torch.sqrt((self.world.coordinates[0, :, :] - centers[i][0]) ** 2 + \
                                             (self.world.coordinates[1, :, :] - centers[i][1]) ** 2) \
                                  for i in range(len(centers))])
 
         # Generate population
         self.population = 20 * torch.exp(-(distances ** 2) / 50)
-    
+        if self.num_types == 3:
+            self.population[2,:,:] = self.population[2,:,:] + self.population[3,:,:]
+            self.population = self.population[:3,:,:]
+
     def make_population_circles(self):
         # Compute distances from each center
         if self.num_types == 2:
-            enters = [Tensor([-25, 0]), Tensor([25, 0])]
+            centers = [Tensor([-25, 0]), Tensor([25, 0])]
         elif self.num_types == 3:
             centers = [Tensor([-25, 0]), Tensor([25, 0]), Tensor([0, 25])]
         distances = torch.stack([torch.sqrt((self.world.coordinates[0, :, :] - centers[i][0]) ** 2 + \
@@ -106,36 +114,48 @@ class Population:
         # Generate population
         self.population = distances.where(distances<=10, torch.tensor([.0]))
         self.population = self.population.where(self.population==0.0, torch.tensor(self.max_seeds))
+
+    def make_population_half(self):
+        # Generate population
+        self.population = torch.stack([self.world.nutrient_map for i in range(self.num_types)])
+        self.population[0,:,:] = self.population[0,:,:].where(self.world.coordinates[1,:,:]>0, torch.tensor(0.0))
+        self.population[1,:,:] = self.population[1,:,:].where(self.world.coordinates[1,:,:]<0, torch.tensor(0.0))
+        if self.num_types==3:
+            self.population[2,:,:] = self.population[2,:,:]*0
+            self.population[2,50,0] = 1.0
     
     # This function should not exist
     def compute_pollen(self):
         return torch.squeeze(self.pollen_func(torch.unsqueeze(self.population, 1)))
 
-    def compute_offspring(self, interactions):
-        all_female_interactions = torch.sum(interactions, 0) #I^i
-        norm_male_interactions = torch.sum(interactions, 1) #I_i
-        # norm_male_interactions = torch.sum(interactions / torch.unsqueeze(all_female_interactions, 1), 0)
-
-        norm_interactions = (all_female_interactions + norm_male_interactions) / 2
-        return torch.min(self.seed_rate * norm_interactions, torch.tensor(self.max_seeds))
+    def compute_offspring(self, interactions:Tensor, outer_pollen:Tensor, self_pollen:Tensor):
+        total_pollen = outer_pollen.sum(1) + self_pollen
+        i_is_male = outer_pollen.sum(1)/total_pollen * interactions.sum(0)
+        i_is_female = torch.sum(outer_pollen/total_pollen*interactions, 1)
+        i_is_self = (1-self.inbreeding_depression)*self_pollen/total_pollen*self_pollen*self.population
+        i_is_both = outer_pollen.diagonal(dim1=0,dim2=1).permute(2,0,1) / total_pollen * interactions.diagonal(dim1=0,dim2=1).permute(2,0,1)
+        return 0.5*i_is_female+0.5*i_is_male+i_is_self
 
     def disperse_seeds(self, new_seeds):
         return torch.squeeze(self.pollen_func(torch.unsqueeze(new_seeds, 1)))
 
     def carrying_capacity(self, new_seeds:Tensor):
-        regulated = new_seeds.where(self.world.nutrient_map>torch.sum(new_seeds, 0), self.world.nutrient_map * new_seeds/torch.sum(new_seeds, 0))
+        regulated = new_seeds.where(self.world.nutrient_map>=torch.sum(new_seeds, 0), self.world.nutrient_map * new_seeds/torch.sum(new_seeds, 0))
         regulated = regulated.where(torch.sum(new_seeds, 0)>0.01, torch.tensor(0.0))
-        return regulated
+        return regulated.floor()
 
     def advance(self):
         # interactions[bottom, top, x, y]
-        pollen_dist = self.compute_pollen()
-        interactions = torch.unsqueeze(self.population, 1) * (pollen_dist / (torch.sum(pollen_dist, 0) - pollen_dist)) # I^[1]_[0] [2,3]
-        interactions[range(self.num_types), range(self.num_types), :, :] = 0 #I^i_i = 0
-        interactions = interactions.where(~torch.isnan(interactions), torch.tensor(0.0))
+        pollen_dist = self.compute_pollen()*(1-self.self_pollen)
+        outer_pollen = self.compatibility*pollen_dist
+        self_pollen = self.self_pollen * self.compatibility.diagonal(dim1=0,dim2=1).permute(2,0,1)
 
-        new_seeds = self.compute_offspring(interactions)
-        # new_seeds = self.disperse_seeds(new_seeds)
+        interactions = torch.unsqueeze(self.population, 1) * (pollen_dist / self.total_population) # I^[1]_[0] [2,3]
+        # interactions[range(self.num_types), range(self.num_types), :, :] = 0 #I^i_i = 0
+        interactions = interactions.where(self.total_population!=0, torch.tensor(0.0))
+
+        new_seeds = self.compute_offspring(interactions, outer_pollen, self_pollen)
+        new_seeds = self.disperse_seeds(new_seeds)
         self.population = self.carrying_capacity(new_seeds)
 
         self.generation += 1
